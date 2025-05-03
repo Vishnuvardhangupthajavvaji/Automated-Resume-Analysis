@@ -1,0 +1,29 @@
+@startuml
+skinparam monochrome true
+
+actor Candidate
+actor Admin
+
+package "Web Application" {
+  [User Interface] --> [Backend Server]
+}
+
+[Backend Server] --> [Resume Parser]
+[Backend Server] --> [ML Model]
+[Backend Server] --> [Database]
+[Backend Server] --> [Social Profile Integration]
+
+[Resume Parser] --> [ML Model]
+[ML Model] --> [Database]
+[Social Profile Integration] --> [Database]
+
+Candidate --> [User Interface] : Register, Login, Upload Resume
+Admin --> [User Interface] : Login, Post Job, Train Model
+
+[User Interface] --> Candidate : Job Recommendations, Skill Suggestions
+[User Interface] --> Admin : Ranked Resumes, Feedback Reports
+
+[Social Profile Integration] --> [LinkedIn API]
+[Social Profile Integration] --> [GitHub API]
+
+@enduml

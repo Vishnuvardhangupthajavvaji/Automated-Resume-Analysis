@@ -1,0 +1,26 @@
+create database resumeanalysis;
+use resumeanalysis;
+
+create table signup(username varchar(50), password varchar(50),
+contact_no varchar(12),
+email_id varchar(50),
+address varchar(50));
+
+create table postjob(job_id int, job_name varchar(50),
+job_details varchar(200),
+skills varchar(400),
+post_date varchar(30),
+company_name varchar(50),
+salary varchar(20));
+
+create table upload_resume(job_id int,
+username varchar(50),
+resume_name varchar(50),
+upload_date varchar(30),
+resume_json varchar(500),
+resume_score varchar(30));
+
+create table feedback(username varchar(50),
+feedback varchar(200),
+feedback_date varchar(30),
+feedback_rank varchar(10));

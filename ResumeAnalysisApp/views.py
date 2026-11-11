@@ -222,7 +222,8 @@ def getScore(job_id, skills):
 
 def UploadResumeAction(request):
     if request.method == 'POST':
-        global uname
+        # global uname
+        uname = str(request.user)
         job_id = request.POST.get('t1', False)
         myfile = request.FILES['t2']
         fname = request.FILES['t2'].name

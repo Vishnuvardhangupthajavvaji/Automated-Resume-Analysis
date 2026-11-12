@@ -1,316 +1,330 @@
-from django.shortcuts import render
-from django.template import RequestContext
+import json
+
 from django.contrib import messages
-import pymysql
-from django.http import HttpResponse
-from django.core.files.storage import FileSystemStorage
-import datetime
-import os
-from datetime import date
-import numpy as np
-import matplotlib.pyplot as mplt
-from importlib.metadata import distribution,metadata,version
+from django.contrib.auth import login
+from django.contrib.auth.decorators import login_required, permission_required
+from django.contrib.auth.models import Group, User
+from django.db.models import Q
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-import pyresparser
+from .forms import ApplicationForm, FeedbackForm, JobForm, SignUpForm
+from .models import Application, Feedback, Job
+from .services import calculate_match, extract_resume_text
 
-from pyresparser import ResumeParser
+PENDING_RECRUITER = "Pending_Recruiter"
+APPROVED_RECRUITER = "Recruiter"
+REJECTED_RECRUITER = "Rejected_Recruiter"
 
-global uname, job_id
 
-def AdminLogin(request):
-    if request.method == 'GET':
-       return render(request, 'AdminLogin.html', {})
+def set_recruiter_status(user, status):
+    """Ensure a user belongs to at most one recruiter-status group."""
+    group_names = [
+        PENDING_RECRUITER,
+        APPROVED_RECRUITER,
+        REJECTED_RECRUITER,
+    ]
 
-def UserLogin(request):
-    if request.method == 'GET':
-       return render(request, 'UserLogin.html', {})
+    user.groups.remove(*Group.objects.filter(name__in=group_names))
 
-def index(request):
-    if request.method == 'GET':
-       return render(request, 'index.html', {})
+    if status:
+        group, _ = Group.objects.get_or_create(name=status)
+        user.groups.add(group)
 
-def Signup(request):
-    if request.method == 'GET':
-       return render(request, 'Signup.html', {})
 
-def Aboutus(request):
-    if request.method == 'GET':
-       return render(request, 'Aboutus.html', {})
+def is_recruiter(user):
+    return user.groups.filter(name=APPROVED_RECRUITER).exists()
 
-def Feedback(request):
-    if request.method == 'GET':
-       return render(request, 'Feedback.html', {})
 
-def SignupAction(request):
-    if request.method == 'POST':
-        username = request.POST.get('t1', False)
-        password = request.POST.get('t2', False)
-        contact = request.POST.get('t3', False)
-        email = request.POST.get('t4', False)
-        address = request.POST.get('t5', False)
-        
-        status = 'none'
-        con = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-        with con:
-            cur = con.cursor()
-            cur.execute("select username from signup where username = '"+username+"'")
-            rows = cur.fetchall()
-            for row in rows:
-                if row[0] == email:
-                    status = 'Given Username already exists'
-                    break
-        if status == 'none':
-            db_connection = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-            db_cursor = db_connection.cursor()
-            student_sql_query = "INSERT INTO signup(username,password,contact_no,email_id,address) VALUES('"+username+"','"+password+"','"+contact+"','"+email+"','"+address+"')"
-            db_cursor.execute(student_sql_query)
-            db_connection.commit()
-            print(db_cursor.rowcount, "Record Inserted")
-            if db_cursor.rowcount == 1:
-                status = 'Signup Process Completed'
-        context= {'data':status}
-        return render(request, 'Signup.html', context)
+def deny_access(request, message):
+    messages.error(request, message)
+    return redirect("home")
 
-def UserLoginAction(request):
-    if request.method == 'POST':
-        global uname
-        option = 0
-        username = request.POST.get('username', False)
-        password = request.POST.get('password', False)
-        con = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-        with con:
-            cur = con.cursor()
-            cur.execute("select * FROM signup")
-            rows = cur.fetchall()
-            for row in rows:
-                if row[0] == username and row[1] == password:
-                    uname = username
-                    option = 1
-                    break
-        if option == 1:
-            context= {'data':'welcome '+username}
-            return render(request, 'UserScreen.html', context)
+
+@require_GET
+def home(request):
+    return render(request, "index.html", {"job_count": Job.objects.count()})
+
+
+@require_http_methods(["GET", "POST"])
+def signup(request):
+    if request.user.is_authenticated:
+        return redirect("job_list")
+
+    form = SignUpForm(request.POST or None)
+
+    if request.method == "POST" and form.is_valid():
+        user = form.save()
+
+        if form.cleaned_data["user_type"] == "recruiter":
+            set_recruiter_status(user, PENDING_RECRUITER)
+            messages.success(
+                request,
+                "Your account is ready. Your recruiter request is awaiting admin approval.",
+            )
         else:
-            context= {'data':'Invalid login details'}
-            return render(request, 'UserLogin.html', context)
+            messages.success(
+                request, "Your applicant account is ready. You can now apply for jobs."
+            )
 
-def AdminLoginAction(request):
-    if request.method == 'POST':
-        global uname
-        option = 0
-        username = request.POST.get('username', False)
-        password = request.POST.get('password', False)
-        if username == "admin" and password == "admin":
-            context= {'data':'welcome '+username}
-            return render(request, 'AdminScreen.html', context)
+        login(request, user)
+        return redirect("job_list")
+
+    return render(request, "Signup.html", {"form": form})
+
+
+@login_required
+@require_POST
+def reapply_recruiter(request):
+    if not request.user.groups.filter(name=REJECTED_RECRUITER).exists():
+        messages.info(
+            request, "You do not have a rejected recruiter request to reapply for."
+        )
+        return redirect("job_list")
+
+    set_recruiter_status(request.user, PENDING_RECRUITER)
+
+    messages.success(
+        request,
+        "Your recruiter request has been submitted again and is awaiting admin approval.",
+    )
+    return redirect("job_list")
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def manage_recruiters(request):
+    if not request.user.is_staff:
+        return deny_access(
+            request, "You do not have permission to access recruiter management."
+        )
+
+    pending_group, _ = Group.objects.get_or_create(name=PENDING_RECRUITER)
+
+    if request.method == "POST":
+        user_id = request.POST.get("user_id")
+        action = request.POST.get("action")
+
+        target_user = get_object_or_404(
+            User,
+            pk=user_id,
+            is_staff=False,
+            is_superuser=False,
+        )
+
+        if not target_user.groups.filter(name=PENDING_RECRUITER).exists():
+            messages.warning(
+                request, "This user no longer has a pending recruiter request."
+            )
+            return redirect("manage_recruiters")
+
+        if action == "approve":
+            set_recruiter_status(target_user, APPROVED_RECRUITER)
+            messages.success(
+                request, f"{target_user.username} has been approved as a recruiter."
+            )
+
+        elif action == "reject":
+            set_recruiter_status(target_user, REJECTED_RECRUITER)
+            messages.success(
+                request, f"{target_user.username} has been rejected as a recruiter."
+            )
+
         else:
-            context= {'data':'Invalid login details'}
-            return render(request, 'AdminLogin.html', context)          
+            messages.error(request, "Invalid action.")
 
-def PostJobs(request):
-    if request.method == 'GET':
-       return render(request, 'PostJobs.html', {})
+        return redirect("manage_recruiters")
 
-def Feedback(request):
-    if request.method == 'GET':
-        return render(request, 'Feedback.html', {})
+    pending_users = User.objects.filter(
+        groups=pending_group,
+        is_staff=False,
+        is_superuser=False,
+    ).order_by("date_joined")
 
-def Aboutus(request):
-    if request.method == 'GET':
-        return render(request, 'Aboutus.html', {})     
+    return render(
+        request,
+        "admin_users.html",
+        {"pending_users": pending_users},
+    )
 
-def FeedbackAction(request):
-    if request.method == 'POST':
-        global uname
-        uname = "XYZ"
-        today = date.today()
-        feedback = request.POST.get('t1', False)
-        rank = request.POST.get('t2', False)
-        db_connection = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-        db_cursor = db_connection.cursor()
-        student_sql_query = "INSERT INTO feedback(username,feedback,feedback_date,feedback_rank) VALUES('"+uname+"','"+feedback+"','"+str(today)+"','"+rank+"')"
-        db_cursor.execute(student_sql_query)
-        db_connection.commit()
-        print(db_cursor.rowcount, "Record Inserted")
-        if db_cursor.rowcount == 1:
-            status = 'Your feedback accepted and admin will review & getback'
-        context= {'data':status}
-        return render(request, 'Feedback.html', context)        
 
-def PostJobsAction(request):
-    if request.method == 'POST':
-        job = request.POST.get('t1', False)
-        details = request.POST.get('t2', False)
-        company = request.POST.get('t3', False)
-        salary = request.POST.get('t4', False)
-        skills = request.POST.getlist('t5')
-        skills = ','.join(skills)
-        today = date.today()
-        status = 'none'
-        job_id = 0
-        con = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-        with con:
-            cur = con.cursor()
-            cur.execute("select count(job_id) from postjob")
-            rows = cur.fetchall()
-            for row in rows:
-                job_id = row[0]
-        job_id = job_id + 1
-        db_connection = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-        db_cursor = db_connection.cursor()
-        student_sql_query = "INSERT INTO postjob(job_id,job_name,job_details,skills,post_date,company_name,salary) VALUES('"+str(job_id)+"','"+job+"','"+details+"','"+skills+"','"+str(today)+"','"+company+"','"+salary+"')"
-        db_cursor.execute(student_sql_query)
-        db_connection.commit()
-        print(db_cursor.rowcount, "Record Inserted")
-        if db_cursor.rowcount == 1:
-            status = 'Job details posted with ID : '+str(job_id)
-        context= {'data':status}
-        return render(request, 'PostJobs.html', context)       
+@require_GET
+def job_list(request):
+    query = request.GET.get("q", "").strip()
+    jobs = Job.objects.all()
 
-def ViewFeedback(request):
-    if request.method == 'GET':
-        output = '<table border=1><tr>'
-        output+='<td><font size="" color="black">Feedback</td>'
-        output+='<td><font size="" color="black">Feedback Date</td>'
-        output+='<td><font size="" color="black">Feedback Rank</td></tr>'
-        rank = []
-        con = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-        with con:
-            cur = con.cursor()
-            cur.execute("select * FROM feedback")
-            rows = cur.fetchall()
-            for row in rows:
-                output+='<tr>'
-                output+='<td><font size="" color="black">'+str(row[1])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[2])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[3])+'</td></tr>'
-                rank.append(row[3])
-        output += "</table><br/><br/><br/>"
-        unique, count = np.unique(np.asarray(rank), return_counts=True)
-        mplt.pie(count,labels=unique,autopct='%1.1f%%')
-        mplt.title('Feedback Ranking Graph')
-        mplt.axis('equal')
-        mplt.show()
-        context= {'data': output}
-        return render(request, 'ViewFeedback.html', context)
-    
-def getScore(job_id, skills):
-    require_skills = None
-    score = 0
-    con = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-    with con:
-        cur = con.cursor()
-        cur.execute("select skills FROM postjob where job_id='"+job_id+"'")
-        rows = cur.fetchall()
-        for row in rows:
-            require_skills = row[0]
-    require_skills = require_skills.strip().split(",")
-    for i in range(len(skills)):
-        skills[i] = skills[i].lower().strip()
-    for i in range(len(require_skills)):
-        require_skills[i] = require_skills[i].lower()
-    print(require_skills)    
-    found_skills = [x for x in skills if x in require_skills]
-    if len(found_skills) > 0:
-        if len(found_skills) >= len(require_skills):
-            score = 100
+    if query:
+        jobs = jobs.filter(
+            Q(title__icontains=query)
+            | Q(company__icontains=query)
+            | Q(required_skills__icontains=query)
+        )
+
+    return render(
+        request,
+        "UserScreen.html",
+        {"jobs": jobs, "query": query},
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def apply_to_job(request, job_id):
+    if is_recruiter(request.user):
+        messages.error(
+            request, "Recruiters cannot apply for jobs using a recruiter account."
+        )
+        return redirect("job_list")
+
+    job = get_object_or_404(Job, pk=job_id)
+
+    if Application.objects.filter(
+        job=job,
+        applicant=request.user,
+    ).exists():
+        messages.info(request, "You have already applied to this role.")
+        return redirect("job_list")
+
+    form = ApplicationForm(
+        request.POST or None,
+        request.FILES or None,
+    )
+
+    if request.method == "POST" and form.is_valid():
+        application = form.save(commit=False)
+        application.job = job
+        application.applicant = request.user
+
+        try:
+            application.save()
+
+            resume_text = extract_resume_text(application.resume.path)
+            score, matched = calculate_match(
+                job.skills_list,
+                resume_text,
+            )
+
+            application.parsed_data = json.dumps(
+                {"text": resume_text},
+                ensure_ascii=False,
+            )
+            application.score = score
+            application.matched_skills = ", ".join(matched)
+
+            application.save(
+                update_fields=[
+                    "parsed_data",
+                    "score",
+                    "matched_skills",
+                ]
+            )
+
+        except Exception:
+            application.resume.delete(save=False)
+            application.delete()
+
+            form.add_error(
+                "resume",
+                "We could not read this file. Please upload a valid PDF or DOCX resume.",
+            )
+
         else:
-            score = len(found_skills) / len(require_skills)
-            score = score * 100
-    return score       
-    
+            messages.success(
+                request,
+                "Application submitted. Match score: {}%.".format(score),
+            )
+            return redirect("my_applications")
 
-def UploadResumeAction(request):
-    if request.method == 'POST':
-        # global uname
-        uname = str(request.user)
-        job_id = request.POST.get('t1', False)
-        myfile = request.FILES['t2']
-        fname = request.FILES['t2'].name
-        today = date.today()
-        fs = FileSystemStorage()
-        filename = fs.save('ResumeAnalysisApp/static/resumes/'+fname, myfile)
-        data = ResumeParser('ResumeAnalysisApp/static/resumes/'+fname).get_extracted_data()
-        skills = data['skills']
-        score = getScore(job_id, skills)
-        data = str(data)
-        data = data.replace("'", "")
-        db_connection = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-        db_cursor = db_connection.cursor()
-        student_sql_query = "INSERT INTO upload_resume(job_id,username,resume_name,upload_date,resume_json,resume_score) VALUES('"+str(job_id)+"','"+uname+"','"+fname+"','"+str(today)+"','"+str(data)+"','"+str(score)+"')"
-        db_cursor.execute(student_sql_query)
-        db_connection.commit()
-        print(db_cursor.rowcount, "Record Inserted")
-        if db_cursor.rowcount == 1:
-            status = 'Your resume submitted with score : '+str(score)
-        context= {'data':status}
-        return render(request, 'UserScreen.html', context)
-        
-        
-
-def UploadResume(request):
-    if request.method == 'GET':
-        job_id = request.GET.get('t1', False)
-        output = '<tr><td><font size="" color="black">Job&nbsp;ID</b></td><td><input type="text" name="t1" style="font-family: Comic Sans MS" size="30" value="'+job_id+'" readonly/></td></tr>'
-        context= {'data':output}
-        return render(request, 'UploadResume.html', context)
-
-def ViewJobs(request):
-    if request.method == 'GET':
-        output = '<table border=1><tr><th><font size="" color=black>Job ID</font></th>'
-        output+='<td><font size="" color="black">Job Name</td>'
-        output+='<td><font size="" color="black">Job Details</td>'
-        output+='<td><font size="" color="black">Suggested Skills</td>'
-        output+='<td><font size="" color="black">Posted Date</td>'
-        output+='<td><font size="" color="black">Company Name</td>'
-        output+='<td><font size="" color="black">Salary</td>'
-        output+='<td><font size="" color="black">Tips</td>'
-        output+='<td><font size="" color="black">Upload Result</td></tr>'
-        rank = []
-        con = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-        with con:
-            cur = con.cursor()
-            cur.execute("select * FROM postjob")
-            rows = cur.fetchall()
-            for row in rows:
-                output+='<tr><td><font size="" color="black">'+str(row[0])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[1])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[2])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[3])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[4])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[5])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[6])+'</td>'
-                output+='<td><font size="" color="black">Must be Proficient</td>'
-                output+='<td><a href=\'UploadResume?t1='+str(row[0])+'\'><font size=3 color=black>Click Here to Upload Resume</font></a></td></tr>'                
-        output += "</table><br/><br/><br/>"
-        context= {'data': output}
-        return render(request, 'UserScreen.html', context)
-    
-def ViewScore(request):
-    if request.method == 'GET':
-        output = '<table border=1><tr><th><font size="" color=black>Job ID</font></th>'
-        output+='<td><font size="" color="black">Username</td>'
-        output+='<td><font size="" color="black">Resume Name</td>'
-        output+='<td><font size="" color="black">Upload Date</td>'
-        output+='<td><font size="" color="black">Resume JSON Data</td>'
-        output+='<td><font size="" color="black">Resume Score</td></tr>'
-        rank = []
-        con = pymysql.connect(host='127.0.0.1',port = 3306,user = 'root', password = 'Vishnu@19', database = 'resumeanalysis',charset='utf8')
-        with con:
-            cur = con.cursor()
-            cur.execute("select * FROM upload_resume")
-            rows = cur.fetchall()
-            for row in rows:
-                output+='<tr><td><font size="" color="black">'+str(row[0])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[1])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[2])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[3])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[4])+'</td>'
-                output+='<td><font size="" color="black">'+str(row[5])+'</td></tr>'                
-        output += "</table><br/><br/><br/>"
-        context= {'data': output}
-        return render(request, 'ViewFeedback.html', context)
+    return render(
+        request,
+        "UploadResume.html",
+        {"form": form, "job": job},
+    )
 
 
-    
+@login_required
+@require_GET
+def my_applications(request):
+    applications = Application.objects.filter(applicant=request.user).select_related(
+        "job"
+    )
 
+    return render(
+        request,
+        "applications.html",
+        {"applications": applications},
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def post_job(request):
+    if not (request.user.is_staff or is_recruiter(request.user)):
+        return deny_access(request, "Only approved recruiters can post jobs.")
+
+    form = JobForm(request.POST or None)
+
+    if request.method == "POST" and form.is_valid():
+        job = form.save(commit=False)
+        job.created_by = request.user
+        job.save()
+
+        messages.success(request, "Job posted successfully.")
+        return redirect("admin_applications")
+
+    return render(request, "PostJobs.html", {"form": form})
+
+
+@login_required
+@require_GET
+def admin_applications(request):
+    if request.user.is_staff:
+        applications = Application.objects.select_related(
+            "job",
+            "applicant",
+        ).all()
+
+    elif is_recruiter(request.user):
+        applications = Application.objects.filter(
+            job__created_by=request.user
+        ).select_related("job", "applicant")
+
+    else:
+        return deny_access(
+            request,
+            "Only administrators and approved recruiters can view applications.",
+        )
+
+    return render(
+        request,
+        "ViewFeedback.html",
+        {"applications": applications},
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def feedback(request):
+    form = FeedbackForm(request.POST or None)
+
+    if request.method == "POST" and form.is_valid():
+        item = form.save(commit=False)
+        item.user = request.user if request.user.is_authenticated else None
+        item.save()
+
+        messages.success(request, "Thank you for your feedback.")
+        return redirect("feedback")
+
+    return render(request, "Feedback.html", {"form": form})
+
+
+@login_required
+@permission_required("ResumeAnalysisApp.view_feedback", raise_exception=True)
+@require_GET
+def view_feedback(request):
+    feedback_items = Feedback.objects.select_related("user").all()
+
+    return render(
+        request,
+        "feedback_list.html",
+        {"feedback_items": feedback_items},
+    )

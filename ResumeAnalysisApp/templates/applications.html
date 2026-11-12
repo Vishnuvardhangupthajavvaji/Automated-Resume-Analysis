@@ -1,0 +1,43 @@
+{% extends 'base.html' %} {% block title %}My applications · ResumeMatch{%
+endblock %} {% block content %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">Your progress</p>
+    <h1>My applications</h1>
+  </div>
+  <a class="button small" href="{% url 'feedback' %}">Feedback</a>
+  <a class="button small" href="{% url 'job_list' %}">Find jobs</a>
+</section>
+{% if applications %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Role</th>
+        <th>Company</th>
+        <th>Match score</th>
+        <th>Matched skills</th>
+        <th>Submitted</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for application in applications %}
+      <tr>
+        <td>{{ application.job.title }}</td>
+        <td>{{ application.job.company }}</td>
+        <td><strong>{{ application.score }}%</strong></td>
+        <td>
+          {{ application.matched_skills|default:'No listed skills matched' }}
+        </td>
+        <td>{{ application.submitted_at|date:'M j, Y' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<section class="empty">
+  <h2>You have not applied yet</h2>
+  <a class="button" href="{% url 'job_list' %}">Browse roles</a>
+</section>
+{% endif %}{% endblock %}

@@ -1,3 +1,5 @@
+# Use PyMySQL as Django's MySQL DB-API driver. This must run before Django
+# initializes the MySQL backend.
 import pymysql
-print(pymysql.__file__)
+
 pymysql.install_as_MySQLdb()

@@ -1,36 +1,51 @@
-{% load static %}
-<html>
-<head>
-<title>Automated Resume Analysis & Skill Suggesting Website using NLP</title>
-<meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<link rel="stylesheet" type="text/css" href="{% static 'style.css' %}"/>
-</head>
-<body>
-<div id="wrapper">
-	<div id="header">
-		<div id="logo">
-			<center><font size="4" color="yellow">Automated Resume Analysis & Skill Suggesting Website using NLP</font></center>
-		</div>
-		<div id="slogan">
-			
-		</div>
-	</div>
-	<div id="menu">
-		<ul><center>
-	  <li><a href="{% url 'PostJobs' %}">Post Jobs</a></li>
-	  <li><a href="{% url 'ViewScore' %}">View Resume Score</a></li>
-	   <li><a href="{% url 'ViewFeedback' %}">View Feedback</a></li>
-      <li><a href="{% url 'index' %}">Logout</a></li>		
-		</center></ul>
-		<br class="clearfix" />
-	</div>
-	<div id="splash">
-		<img class="pic" src="{% static 'images/investor.jpg' %}" width="870" height="230" alt="" />
-	</div>
-	<br/>
-	<center>{{ data|safe }}</center>
-
-	
-</p>
-</body>
-</html>
+{% extends 'base.html' %} {% block title %}Applications · ResumeMatch{% endblock
+%} {% block content %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">Recruiter workspace</p>
+    <h1>Applications</h1>
+  </div>
+  <div class="actions">
+    {% if perms.ResumeAnalysisApp.add_job %}
+    <a class="button small" href="{% url 'post_job' %}">Post a job</a>
+    {% endif %} {% if perms.ResumeAnalysisApp.view_feedback %}
+    <a class="button secondary small" href="{% url 'view_feedback' %}"
+      >Feedback</a
+    >
+    {% endif %}
+  </div>
+</section>
+{% if applications %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Candidate</th>
+        <th>Role</th>
+        <th>Score</th>
+        <th>Matched skills</th>
+        <th>Submitted</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for application in applications %}
+      <tr>
+        <td>{{ application.applicant.username }}</td>
+        <td>
+          {{ application.job.title }}<br /><small
+            >{{ application.job.company }}</small
+          >
+        </td>
+        <td><strong>{{ application.score }}%</strong></td>
+        <td>
+          {{ application.matched_skills|default:'No listed skills matched' }}
+        </td>
+        <td>{{ application.submitted_at|date:'M j, Y' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<section class="empty"><h2>No applications yet</h2></section>
+{% endif %}{% endblock %}

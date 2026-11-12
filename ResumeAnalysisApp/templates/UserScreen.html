@@ -1,33 +1,53 @@
-{% load static %}
-<html>
-<head>
-<title>Automated Resume Analysis & Skill Suggesting Website using NLP</title>
-<meta http-equiv="content-type" content="text/html; charset=utf-8" />
-<link rel="stylesheet" type="text/css" href="{% static 'style.css' %}"/>
-</head>
-<body>
-<div id="wrapper">
-	<div id="header">
-		<div id="logo">
-			<center><font size="4" color="yellow">Automated Resume Analysis & Skill Suggesting Website using NLP</font></center>
-		</div>
-		<div id="slogan">
-			
-		</div>
-	</div>
-	<div id="menu">
-		<ul><center>
-	  <li><a href="{% url 'ViewJobs' %}">View Jobs & Get Suggestions</a></li>
-	  <li><a href="{% url 'index' %}">Logout</a></li>		
-		</center></ul>
-		<br class="clearfix" />
-	</div>
-	<div id="splash">
-		<img class="pic" src="{% static 'images/investor.jpg' %}" width="870" height="230" alt="" />
-	</div>
-	<br/>
-	<font size="" color="black"><center>{{ data|safe }}</center></font>
-
-	
-</body>
-</html>
+{% extends 'base.html' %} {% block title %}Open jobs · ResumeMatch{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">Opportunities</p>
+    <h1>Open roles</h1>
+    <p>Apply with a private résumé and get an explained skills match.</p>
+  </div>
+  <form class="search" method="get">
+    <label class="sr-only" for="search">Search jobs</label
+    ><input
+      id="search"
+      name="q"
+      value="{{ query }}"
+      placeholder="Role, company, or skill"
+    /><button class="button small">Search</button>
+  </form>
+</section>
+{% if jobs %}
+<div class="job-grid">
+  {% for job in jobs %}
+  <article class="job-card">
+    <div>
+      <p class="muted">{{ job.company }}</p>
+      <h2>{{ job.title }}</h2>
+      <p>{{ job.description|truncatechars:180 }}</p>
+      <div class="tags">
+        {% for skill in job.skills_list %}<span>{{ skill }}</span>{% endfor %}
+      </div>
+    </div>
+    <div class="job-footer">
+      <span
+        >{% if job.salary %}{{ job.salary }}{% else %}Compensation discussed
+        during interview{% endif %}</span
+      >{% if user.is_authenticated %}<a
+        class="button small"
+        href="{% url 'apply_to_job' job.id %}"
+        >Apply</a
+      >{% else %}<a
+        class="button small"
+        href="{% url 'login' %}?next={% url 'apply_to_job' job.id %}"
+        >Log in to apply</a
+      >{% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<section class="empty">
+  <h2>No roles found</h2>
+  <p>Try a different search term.</p>
+</section>
+{% endif %} {% endblock %}

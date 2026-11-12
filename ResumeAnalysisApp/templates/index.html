@@ -1,42 +1,46 @@
-{% extends 'base.html' %} {% block content %}
-<section class="hero">
-  <p class="eyebrow">Candidate-first hiring</p>
-  <h1>Find the right role.<br />Understand the match.</h1>
-  <p class="lede">
-    Upload a PDF or DOCX resume and receive a clear skills match for each
-    opportunity—without exposing your document publicly.
-  </p>
-  <div class="actions">
-    <a class="button" href="{% url 'job_list' %}"
-      >Explore {{ job_count }} open roles</a
-    >{% if not user.is_authenticated %}<a
-      class="button secondary"
-      href="{% url 'signup' %}"
-      >Get started</a
-    >{% endif %}
-  </div>
-</section>
-<section class="feature-grid">
-  <article>
-    <h2>Private by design</h2>
-    <p>
-      Resumes are stored outside public static files and are visible only to
-      authorized recruiters.
+{% extends "base.html" %}
+{% block content %}
+  <section class="hero">
+    <p class="eyebrow">Candidate-first hiring</p>
+    <h1>
+      Find the right role.
+      <br />
+      Understand the match.
+    </h1>
+    <p class="lede">
+      Upload a PDF or DOCX resume and receive a clear skills match for each
+      opportunity—without exposing your document publicly.
     </p>
-  </article>
-  <article>
-    <h2>Transparent matching</h2>
-    <p>
-      See the skills matched to each role and a straightforward percentage
-      score.
-    </p>
-  </article>
-  <article>
-    <h2>Built for action</h2>
-    <p>
-      Search open jobs, apply once per role, and track every submission in one
-      place.
-    </p>
-  </article>
-</section>
+    <div class="actions">
+      <a class="button" href="{% url 'job_list' %}">
+        Explore {{ job_count }} open roles
+      </a>
+      {% if not user.is_authenticated %}
+        <a class="button secondary" href="{% url 'signup' %}">Get started</a>
+      {% endif %}
+    </div>
+  </section>
+  <section class="feature-grid">
+    <article>
+      <h2>Private by design</h2>
+      <p>
+        Resumes are stored outside public static files and are visible only to
+        authorized recruiters.
+      </p>
+    </article>
+    <article>
+      <h2>Transparent matching</h2>
+      <p>
+        See the skills matched to each role and a straightforward percentage
+        score.
+      </p>
+    </article>
+    <article>
+      <h2>Built for action</h2>
+      <p>
+        Search open jobs, apply once per role, and track every submission in one
+        place.
+      </p>
+    </article>
+  </section>
 {% endblock %}

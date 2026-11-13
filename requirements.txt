@@ -4,9 +4,11 @@ charset-normalizer==3.5.2
 cryptography==50.0.2
 Django==5.1.15
 docx2txt==0.9
+gunicorn==27.0.1
 pdfminer.six==20260107
 pycparser==3.12
 pycryptodome==4.4.0
 PyMySQL==1.2.4
 sqlparse==0.6.1
 tzdata==2026.6
+whitenoise==6.12.0
